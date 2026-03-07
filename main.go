@@ -1,48 +1,101 @@
 package main
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
-// 1. Adım: Gelen siparişin şeklini tanımlayalım
+// Dışarıdan gelen veriyi okumak için kullandığımız şablon
+// (gorm:"primaryKey" yazısını sildik çünkü bunu artık veritabanında tablo yapmayacağız)
 type Order struct {
-	ID        string  `json:"id"`
+	ID        string  `json:"id" gorm:"primaryKey"`
 	ProductID string  `json:"product_id"`
 	Quantity  int     `json:"quantity"`
 	Price     float64 `json:"price"`
 }
 
+// Olay (event)
+type Event struct {
+	ID          uint `gorm:"primaryKey"`
+	AggregateID string
+	EventType   string
+	Payload     string
+	CreatedAt   time.Time
+}
+
+// Tüm projemizden veritabanına erişebilmek için globel bir DB değişkeni oluşturdum
+var DB *gorm.DB
+
+// 2. Adım: Veritabanına bağlama fonksiyonu
+func initDB() {
+	// Docker da kurduğumuz PostgreSQL in kapı numarası ve şifresi (Buna DSN denir)
+	dsn := "host=localhost user=root password=rootpassword dbname=paribu_db port=5432 sslmode=disable"
+
+	var err error
+	// GORM ile veritabanının kapısını çalıyoruz
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		// Bağlanmazsa uygulamayı durdur
+		log.Fatal("Veritabanına bağlanıılmadı! Hata:", err)
+	}
+
+	log.Println("PostgreSQL Veritabanına başarıyla bağlanddı")
+
+	// Eğer veritabanında "orders" diye bir tablo yoksa, GORM bizim için otomatik olarak o tabloyu oluşturur
+	// Bu klasik olandır biz burda bunu artık order tablosu değil event tanlosu oluşturacaz
+	DB.AutoMigrate(&Event{})
+}
 
 func main() {
-	// 2. Adım: Gin motorunu başlatacaz
+	// API kapılarını açmadan önce veritabanını hazırlıyalım
+	initDB()
+
+	// Gin baslat
 	r := gin.Default()
 
-	// 3. Adım: Kapıyı (endpoint) oluşturacaz. Sadece post isteklerini kabul eder.
 	r.POST("/order", func(c *gin.Context) {
-
-		// Bos bir sipariş kutusu oluşturalım
 		var newOrder Order
 
-		// Kullanıcının gönderdiği JSON versini alıp, bizim bos kutuya (newOrder) doldurmaya çalışıyoruz.
+		// Gelen siparişi kutuya doldur
 		if err := c.ShouldBindJSON(&newOrder); err != nil {
-			// Eğer veri bozuksa veya yanlış formatta gelirse hata fırlat
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Gecersiz veri formatı. Lütfen doğru JSON gönderin."})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Gecersiz veri formatı"})
 			return
 		}
 
-		// Şu anlık test: Veriyi aldık, veritabanına veya Redpandaya gönderiyecez
-		// Sadece vriyi doğtu adlığımızı kanıtlamak için kullanıcıya geri dönürüyoruz
+		// 2. Siparişi bir JSON metnine dönüştür (Payload içine koyabilmek için)
+		// Go da structı JSON metnine çevirme işlemine "Marshal" denir.
+		orderJSON, _ := json.Marshal(newOrder)
+
+		// 3. Bir olay (event) oluştur
+		newEvent := Event{
+			AggregateID: newOrder.ID,
+			EventType:   "OrderCreated",
+			Payload:     string(orderJSON),
+			CreatedAt:   time.Now(),
+		}
+
+		// 4. Siparişi değil, olayı veritabanına kaydet
+		result := DB.Create(&newEvent)
+
+		// Eğer kaydederken hata çıkarsa (Örneğin aynı ID den ikinci kez göndermeye çalışırsak)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Olay veritabanına kaydedilmedi (Aynı ID kullanılmış olabilir)"})
+			return
+		}
+
+		// Kayıt başarıyla yapılınca kullanıcıya haber edelim
 		c.JSON(http.StatusOK, gin.H{
-			"mesaj":          "Sipariş başarıyla alındı (CQRS - Command tarafı çalışıyor)",
-			"siparis_detayi": newOrder,
+			"mesaj": "Event Sourcing başarılı 'OrderCreated olayı veritabanına yazıldı",
+			"olay":  newEvent,
 		})
 	})
 
-	// 4. Adım: Sunucuyu çalıştıralım 
-	// 8080 portunu Redpanda kullanıyor bu yüzden API mizi 8081 portunda başlatıyoruz
-
+	// Sunucuyu çalıştır
 	r.Run(":8081")
-
 }
