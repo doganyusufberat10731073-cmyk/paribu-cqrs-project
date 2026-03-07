@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/segmentio/kafka-go" // Postacının kütüphanesi
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -31,8 +33,9 @@ type Event struct {
 
 // Tüm projemizden veritabanına erişebilmek için globel bir DB değişkeni oluşturdum
 var DB *gorm.DB
+var KafkaWriter *kafka.Writer // Küresel postacı
 
-// 2. Adım: Veritabanına bağlama fonksiyonu
+// 1. Adım: Veritabanına bağlama fonksiyonu
 func initDB() {
 	// Docker da kurduğumuz PostgreSQL in kapı numarası ve şifresi (Buna DSN denir)
 	dsn := "host=localhost user=root password=rootpassword dbname=paribu_db port=5432 sslmode=disable"
@@ -52,9 +55,20 @@ func initDB() {
 	DB.AutoMigrate(&Event{})
 }
 
+// Postacıyı hazırlma fonksiyonu
+func initKafka() {
+	KafkaWriter = &kafka.Writer{
+		Addr:     kafka.TCP("localhost:9092"), // Docker da açtığımız Redpanda kapısı bu
+		Topic:    "order-events",              // Olayı bağıracağımız kanalın adı
+		Balancer: &kafka.LeastBytes{},
+	}
+	log.Println("Redpanda (Kafka) Postacısı göreve hazır")
+}
+
 func main() {
 	// API kapılarını açmadan önce veritabanını hazırlıyalım
 	initDB()
+	initKafka() // Postacıyı başlat
 
 	// Gin baslat
 	r := gin.Default()
@@ -80,18 +94,34 @@ func main() {
 			CreatedAt:   time.Now(),
 		}
 
-		// 4. Siparişi değil, olayı veritabanına kaydet
-		result := DB.Create(&newEvent)
+		// Önce veritabanına kayet
+		if result := DB.Create(&newEvent); result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Veritabanı hatası"})
+			return
+		}
 
-		// Eğer kaydederken hata çıkarsa (Örneğin aynı ID den ikinci kez göndermeye çalışırsak)
-		if result.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Olay veritabanına kaydedilmedi (Aynı ID kullanılmış olabilir)"})
+		// Kayıt başarılıysa, olayı redpandaya fırlat
+		// Olayı json a çeviriyoruz ki postacı taşıyabilsin
+		eventBytes, _ := json.Marshal(newEvent)
+
+		err := KafkaWriter.WriteMessages(
+			context.Background(),
+			kafka.Message{
+				Key:   []byte(newEvent.AggregateID), // Sipariş ID
+				Value: eventBytes,                   // Tüm olay detayı
+			},
+		)
+
+		if err != nil {
+			// Redpanda ya göndermezsek uyar
+			log.Println("Redpanda ya gönderilmedi:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Postacıya verilmedi"})
 			return
 		}
 
 		// Kayıt başarıyla yapılınca kullanıcıya haber edelim
 		c.JSON(http.StatusOK, gin.H{
-			"mesaj": "Event Sourcing başarılı 'OrderCreated olayı veritabanına yazıldı",
+			"mesaj": "Olay hem veritabanına yazıldı hem de Redpanda ya fırlatıldı",
 			"olay":  newEvent,
 		})
 	})
