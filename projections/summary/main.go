@@ -8,6 +8,7 @@ import (
 	"github.com/segmentio/kafka-go"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // 1. Okuma tablosu
@@ -18,6 +19,12 @@ type OrderSummary struct {
 	Quantity    int
 	TotalPrice  float64
 	OrderStatus string // Örn: "Hazırlanıyor"
+}
+
+// Dış kutu (event) şablonu
+type KafkaEvent struct {
+	AggregateID string `json:"AggregateID"`
+	Payload     string `json:"Payload"` // Asıl siparişimiz bunun içinde gizli
 }
 
 // 2. Gelen paketi açma şablonu
@@ -61,11 +68,15 @@ func main() {
 			break
 		}
 
-		log.Printf("Bir mesaj var. Sipariş ID: %s\n", string(m.Key))
+		// Önce dış kutuyu açıyoruz
+		var kEvent KafkaEvent
+		json.Unmarshal(m.Value, &kEvent)
 
-		// Gelen mesajdaki o karmaşık JSON paketini açıp payload değişkenine dolduruyoruz
+		// Şimdi içindeki 'payload' bölmesini açıp siparişi alıyoruz
 		var payload OrderEventPayload
-		json.Unmarshal(m.Value, &payload)
+		json.Unmarshal([]byte(kEvent.Payload), &payload)
+
+		log.Printf("Bir mesaj var. Sipariş ID: %s\n", string(m.Key))
 
 		// 6. Okuma tablosuna yazılacak veriyi hazırlayalım
 		summary := OrderSummary{
@@ -76,8 +87,11 @@ func main() {
 			OrderStatus: "Sipariş Alındı",
 		}
 
-		// 7. Veritabanına (Okuma tablosuna) kaydet
-		db.Create(&summary)
+		// 7. Veritabanına upsert (idempotency) ile kaydet
+		// Eğer OrderID zaetn varsa hata verme, sadece bilgileri güncelle
+		db.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&summary)
 		log.Println("İş Tamam: Sipariş, okuma tablosuna (order_summaries) başarıyla yazıldı \n---")
 	}
 }
