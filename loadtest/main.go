@@ -3,62 +3,72 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 func main() {
 	toplamIstek := 100000000 // Göndereceğimiz toplam sipariş sayısı
-	ayniAnda := 100          // Aynı anda çalışacak robot sayısı
+	ayniAnda := 150          // Aynı anda çalışacak robot sayısı
 
-	fmt.Printf("%d Sipaiş fırlatılacak\n", toplamIstek)
+	var basarili int64
+	var basarisiz int64
+
+	fmt.Printf("%d Sipaiş, %d seçkin işçi (Goroutine) ile fırlatılıyor...\n", toplamIstek, ayniAnda)
 	baslangic := time.Now()
 
 	var wg sync.WaitGroup
-	isler := make(chan int, toplamIstek)
 
-	// Özel bir HTTP İstemcisi: Bağlantıları koparmadan art arda gönderöek için
-	client := &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 100,
-		},
-		Timeout: 10 * time.Second,
-	}
+	istekBasinaIsci := toplamIstek / ayniAnda
 
-	// Robotları çalıştırıyoruz
-	for i := 1; i <= ayniAnda; i++ {
+	// 150 tane işçi oluşturuyoruz
+	for i := 0; i < ayniAnda; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := range isler {
-				// Her siparişe rastgele bir ID ve rastgele bir ürün atıyoruz
-				urunler := []string{"iphone-15", "macbook-pro", "oyuncu-koltugu", "oyuncu-klavyesi"}
-				secilenUrun := urunler[rand.Intn(len(urunler))]
 
-				jsonVeri := fmt.Sprintf(`{"id":"stres-test-%d", "product_id":"%s", "quantity":1, "price":5000.0}`, j, secilenUrun)
+			// Timeout yani sunucu cevap vermezse askıda kalıp RAM yemesin
+			client := &http.Client{Timeout: 10 * time.Second}
 
-				req, _ := http.NewRequest("POST", "http://localhost:8081/order", bytes.NewBuffer([]byte(jsonVeri)))
+			for j := 0; j < istekBasinaIsci; j++ {
+				payload := []byte(`{"id": "stres-test","product_id":"iphone-15","quantity":1, "price": 5000}`)
+				req, _ := http.NewRequest("POST", "http://localhost:8081/order", bytes.NewBuffer(payload))
 				req.Header.Set("Content-Type", "application/json")
 
-				// İsteği gönder
 				resp, err := client.Do(req)
-				if err == nil {
-					resp.Body.Close()
+				if err != nil {
+					atomic.AddInt64(&basarisiz, 1)
+					continue
+				}
+
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					atomic.AddInt64(&basarili, 1)
+
+				} else {
+					atomic.AddInt64(&basarisiz, 1)
 
 				}
+				resp.Body.Close()
 			}
 		}()
-
 	}
 
-	// Robotların önüne 100.000 adet iş koyuyoruz
-	for i := 1; i <= toplamIstek; i++ {
-		isler <- i
-	}
-	close(isler)
+	// Mtrix ekranı için izleyici (Her 5 saniyede bir log basar)
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			suAnkiBasarili := atomic.LoadInt64(&basarili)
+			suAnkiBasarisiz := atomic.LoadInt64(&basarisiz)
+			gecenSure := time.Since(baslangic).Seconds()
+			tps := float64(suAnkiBasarili+suAnkiBasarisiz) / gecenSure
+
+			fmt.Printf("Süre: %v | Başarılı: %d | Başarısız: %d | TPS: %.0f/sn\n",
+				time.Since(baslangic).Round(time.Second), suAnkiBasarili, suAnkiBasarisiz, tps)
+
+		}
+	}()
 
 	// Tüm robotların işini bitirmesini bekle
 	wg.Wait()
