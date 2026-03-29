@@ -35,16 +35,12 @@ Projenin dayanıklılığını ölçmek için yerel ve bulut (Cloud) ortamında 
 * Kendi geliştirdiğimiz `loadtest/main.go` scripti ile sisteme localde 1.000.000 sahte sipariş fırlatılmıştır.
 * Sonuç: Test ~30 dakikada başarıyla tamamlanmış ve tüm veriler Event Sourcing mimarisine uygun şekilde işlenmiştir.
 
-<br>
-<video src="assets/local-video.mp4" controls="controls" width="100%">
-</video>
+▶️ **[1 Milyonluk Local Test Videosunu İzlemek İçin Tıklayın](./assets/local-video.mp4)**
 
 ### 2. Bulut Testi (AWS EC2) - Donanım Kırılma Noktası Analizi
 Sistemin sınırlarını görmek için AWS üzerinde `c7i-flex.large` (4GB RAM, 30GB Disk) sunucusunda 100 Milyonluk devasa bir yük testi başlatılmıştır.
 
-<br>
-<video src="assets/aws-video.mp4" controls="controls" width="100%">
-</video>
+▶️ **[9.77 Milyonluk AWS Donanım Sınır Testi Videosunu İzlemek İçin Tıklayın](./assets/aws-video.mp4)**
 
 * Karşılaşılan İlk Kriz (OOM Killer): İlk denemede milyonlarca Goroutine aynı anda açıldığı için 4GB RAM saniyeler içinde %100'e ulaşmış ve Linux çekirdeği sunucuyu korumak için OOM (Out of Memory) Killer'ı devreye sokarak süreci sonlandırmıştır.
 * Mühendislik Çözümü (Worker Pool & Rate Limiting): Kod revize edilerek 150 işçiden (Worker) oluşan bir havuz kurulmuş ve `Timeout` mekanizmaları eklenmiştir. Bu sayede RAM kullanımı 2.2GB seviyesinde sabitlenmiş ve sistem stabilize edilmiştir.
