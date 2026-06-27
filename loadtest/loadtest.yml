@@ -1,0 +1,42 @@
+config:
+  target: "http://localhost:8081"
+  phases:
+    - duration: 10
+      arrivalRate: 10
+      name: "1. Aşama: Isınma (Warm Up)"
+    - duration: 30
+      arrivalRate: 50
+      name: "2. Aşama: Kaos ve Yüklenme (Ramp Up)"
+
+scenarios:
+  # Senaryo 1: Vitrin (Redis Cache) - %80 Ağırlık
+  - name: "Ürün İnceleyenler (Redis Testi)"
+    weight: 8
+    flow:
+      - get:
+          url: "/product/iphone15"
+
+  # Senaryo 2: Gerçek alcılar (Kafka ve Postgresql) - %20 Ağırlık
+  - name: "Satın Alanlar (Sipariş Testi)"
+    weight: 2
+    flow:
+      # Fast reject yememek için her kullancıya rastgele bir ürün ID si ürün üretiyoruz
+      - post:
+          url: "/reserve"
+          json:
+            user_id: "load_test_user"
+            product_id: "urun_{{ $randomString() }}"
+            quantity: 1
+            price: 75000
+          capture:
+            - json: "$.reservation_id"
+              as: "res_id"
+
+      # Sadece rezervasyon başarılı olduysa (res_id varsa) ödemeye geç
+      - post:
+          ifTrue: "res_id"
+          url: "/payment"
+          json:
+            reservation_id: "{{ res_id }}"
+            user_id: "load_test_user"
+            price: 75000
