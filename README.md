@@ -101,10 +101,10 @@ Sistemin temel omurgası tamamlanmış olup, ilerleyen fazlarda eklenecek mimari
 
 4. Ana API'yi (Command) ve İşçileri (Projections) ayrı terminallerde çalıştırın:
 
-   go run main.go
-   go run projections/summary/main.go
-   go run projections/inventory/main.go
-   go run projections/revenue/main.go
-   go run analytics_worker.go
-   go run notification_worker.go
-   go run notification_worker.go
+  * go run main.go
+  * go run projections/summary/main.go 
+  * go run projections/inventory/main.go
+  * go run projections/revenue/main.go
+  * go run analytics_worker.go
+  * go run notification_worker.go
+  * go run notification_worker.go
