@@ -88,7 +88,7 @@ Sistemin temel omurgası tamamlanmış olup, ilerleyen fazlarda eklenecek mimari
 
 1. Projeyi klonlayın ve klasöre girin:
 
-   git clone <repo-url>
+   git clone <[repo-url](https://github.com/doganyusufberat10731073-cmyk/paribu-cqrs-project)>
    cd paribu-cqrs-project
 
 2. Docker Compose ile PostgreSQL ve Redpanda'yı ayağa kaldırın:
@@ -105,6 +105,6 @@ Sistemin temel omurgası tamamlanmış olup, ilerleyen fazlarda eklenecek mimari
   * go run projections/summary/main.go 
   * go run projections/inventory/main.go
   * go run projections/revenue/main.go
-  * go run analytics_worker.go
-  * go run notification_worker.go
-  * go run notification_worker.go
+  * cd analytics && go run analytics_worker.go
+  * cd notification && go run notification_worker.go
+  * cd email && go run email_worker.go
